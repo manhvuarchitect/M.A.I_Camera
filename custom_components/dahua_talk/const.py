@@ -1,0 +1,32 @@
+"""Hằng số của tích hợp Assist Camera."""
+
+DOMAIN = "dahua_talk"
+
+CONF_MIC_URL = "mic_url"
+DEFAULT_PORT = 37777
+
+#: Cách nói ra loa camera: giao thức Dahua cổng 37777 (Imou/Dahua), hay kênh tiếng ngược
+#: RTSP/ONVIF (EZVIZ, Hikvision, camera ONVIF có loa).
+CONF_TALK = "talk_protocol"
+TALK_DAHUA = "dahua"
+TALK_RTSP = "rtsp"
+#: Hikvision / EZVIZ qua HCNetSDK cổng 8000 (thư viện người dùng chép vào /config/hcnetsdk/lib).
+TALK_HIK = "hik"
+HIK_SDK_DIR = "hcnetsdk/lib"
+CONF_RTSP_PATH = "rtsp_path"
+#: Loại camera chọn lúc thêm — quyết định những ô cần điền và cách nói.
+CONF_LOAI = "camera_type"
+LOAI_IMOU = "imou"
+LOAI_EZVIZ = "ezviz"
+LOAI_ONVIF = "onvif"
+#: EZVIZ: tick "nghe mic camera" — URL mic dựng từ IP + mật khẩu (luồng phụ 102).
+CONF_NGHE_MIC = "nghe_mic"
+DEFAULT_RTSP_PORT = 554
+DEFAULT_RTSP_PATH = "/Streaming/Channels/101"
+
+#: Tiếng mic đưa vào pipeline: PCM16 mono 16 kHz — định dạng Assist đòi.
+MIC_RATE = 16000
+MIC_CHUNK = 2048
+
+#: Khuếch đại mic tối đa (dB). Cao hơn thì tiếng ồn nền cũng lớn theo.
+MIC_GAIN_MAX = 30

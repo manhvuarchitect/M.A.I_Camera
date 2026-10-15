@@ -1,0 +1,8 @@
+__pycache__/
+*.py[cod]
+.pytest_cache/
+temp-go2rtc/
+*.zip
+*.tar.gz
+.DS_Store
+Thumbs.db

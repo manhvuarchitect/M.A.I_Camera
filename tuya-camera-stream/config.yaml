@@ -1,8 +1,8 @@
-name: "M.A.I TuyaCamera"
+name: "M.A.I Camera"
 version: "1.0.20"
-slug: "mai_tuya_camera"
-description: "Stream Tuya Smart Cameras as local RTSP via tuya-ipc-terminal."
-url: "https://github.com/manhvuarchitect/M.A.I_CameraTuya"
+slug: "mai_camera"
+description: "Stream Cameras as local RTSP via tuya-ipc-terminal and provide Assist Camera features."
+url: "https://github.com/manhvuarchitect/M.A.I_Camera"
 arch:
   - aarch64
   - amd64
@@ -32,5 +32,5 @@ schema:
 map:
   - data:rw
 panel_icon: mdi:cctv
-panel_title: "Tuya Camera"
+panel_title: "M.A.I Camera"
 

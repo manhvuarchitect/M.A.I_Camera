@@ -1,0 +1,177 @@
+"""Assist Camera (mã dahua_talk) — mic và loa camera (Imou/Dahua, EZVIZ, ONVIF) thành vệ tinh Assist và loa trong HA.
+
+Mỗi camera là một mục cấu hình, sinh ra:
+
+* ``assist_satellite`` — nghe mic camera, chạy pipeline Assist của HA (từ gọi,
+  nhận giọng, hiểu lệnh, đọc trả lời), trả lời ra loa camera; hội thoại nối tiếp
+  khi câu trả lời là câu hỏi lại; ``assist_satellite.announce`` phát thông báo.
+* ``media_player`` — ``tts.speak`` / ``media_player.play_media`` ra loa camera.
+* ô chọn pipeline, ô chọn độ nhạy "nói xong", công tắc tắt mic, mức tăng mic.
+* bộ đàm: mic điện thoại qua thẻ WebRTC Camera (go2rtc) → loa camera; dịch vụ
+  ``dahua_talk.get_intercom_source`` trả dòng dán vào go2rtc.yaml — nguồn RTSP cổng 8557
+  (Opus → 16 kHz, ``rtsp_intercom``), hoặc dòng ``exec:`` 8 kHz khi HA thiếu bộ giải mã Opus.
+
+Loa đi qua cổng 37777 của camera (giao thức nói của Dahua), hoặc qua kênh tiếng ngược
+RTSP/ONVIF với camera EZVIZ/Hikvision/ONVIF (``rtsp_talk``). Mic đọc từ một URL
+(luồng go2rtc hoặc RTSP) bằng ffmpeg của HA. Không cần dịch vụ nào ngoài HA.
+"""
+
+from __future__ import annotations
+
+import secrets
+from urllib.parse import urlsplit
+from dataclasses import dataclass, field
+
+import voluptuous as vol
+
+from homeassistant.components.ffmpeg import get_ffmpeg_manager
+from homeassistant.config_entries import ConfigEntry
+from homeassistant.const import (CONF_HOST, CONF_PASSWORD, CONF_PORT, CONF_USERNAME,
+                                 EVENT_HOMEASSISTANT_STOP, Platform)
+from homeassistant.core import (Event, HomeAssistant, ServiceCall, ServiceResponse,
+                                SupportsResponse, callback)
+from homeassistant.exceptions import ServiceValidationError
+from homeassistant.helpers import config_validation as cv
+from homeassistant.helpers import entity_registry as er
+from homeassistant.helpers.typing import ConfigType
+
+from .const import (CONF_MIC_URL, CONF_RTSP_PATH, CONF_TALK, DEFAULT_PORT, DEFAULT_RTSP_PATH,
+                    DOMAIN, HIK_SDK_DIR, TALK_HIK, TALK_RTSP)
+from .intercom import CONF_INTERCOM_KEY, IntercomView, go2rtc_source
+from .hik_talk import MoPhienHik
+from .http_talk import MoPhienImou
+from .rtsp_intercom import MayChuBoDam, go2rtc_rtsp_source
+from .rtsp_talk import RtspTalkSession
+from .speaker import Speaker
+
+CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
+
+PLATFORMS = [Platform.ASSIST_SATELLITE, Platform.MEDIA_PLAYER, Platform.NUMBER, Platform.SELECT,
+             Platform.SWITCH]
+
+
+@dataclass
+class DahuaTalkData:
+    speaker: Speaker
+    mic_url: str
+    mic_muted: bool = False
+    #: Khuếch đại mic (dB) trước khi đưa vào pipeline — mic camera nhỏ, nói cách
+    #: 3 m không tới ngưỡng từ gọi (đo thật: phải +18 dB). Nói gần thì 0 dB tốt hơn hẳn (đo
+    #: 26/09/2026: okay_nabu 5/6 lần ở 0 dB, 1/6 ở +30 dB) — nên mặc định 0.
+    mic_gain_db: float = 0.0
+    #: Bắt được từ gọi thì loa kêu "ting" — người gọi biết là nói được (công tắc riêng).
+    ting: bool = True
+    #: Sau gói tiếng cuối loa gửi đi, mic vệ tinh còn bị bỏ ngần này giây (loa camera phát trễ + vang phòng). Issue
+    #: #3 (29/09/2026): EZVIZ qua HCNetSDK mở mic lại khi loa còn phát → đuôi câu trả lời lọt vào mic, vệ tinh tự đánh
+    #: thức 9 lần trong 6 phút. Mặc định theo đường nói (``che_mic_mac_dinh``), chỉnh từng camera bằng ô số.
+    che_mic_giay: float = 0.5
+    _nghe_doi: list = field(default_factory=list)
+    _nghe_tang: list = field(default_factory=list)
+
+    @callback
+    def set_mic_muted(self, tat: bool) -> None:
+        self.mic_muted = tat
+        for ham in list(self._nghe_doi):
+            ham(tat)
+
+    @callback
+    def listen_mute(self, ham) -> callable:
+        self._nghe_doi.append(ham)
+        return lambda: self._nghe_doi.remove(ham)
+
+    @callback
+    def set_mic_gain(self, db: float) -> None:
+        if db == self.mic_gain_db:
+            return
+        self.mic_gain_db = db
+        for ham in list(self._nghe_tang):
+            ham(db)
+
+    @callback
+    def listen_gain(self, ham) -> callable:
+        self._nghe_tang.append(ham)
+        return lambda: self._nghe_tang.remove(ham)
+
+
+type DahuaTalkConfigEntry = ConfigEntry[DahuaTalkData]
+
+
+async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
+    hass.http.register_view(IntercomView())
+    may_chu = MayChuBoDam(hass)
+    if await may_chu.async_start():
+        async def _dung(_e: Event) -> None:
+            await may_chu.async_stop()
+        hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STOP, _dung)
+
+    async def _nguon_bo_dam(call: ServiceCall) -> ServiceResponse:
+        entity_id = call.data["entity_id"]
+        rec = er.async_get(hass).async_get(entity_id)
+        entry = hass.config_entries.async_get_entry(rec.config_entry_id) if rec else None
+        if entry is None or entry.domain != DOMAIN:
+            raise ServiceValidationError(f"{entity_id} is not an Assist Camera entity")
+        key, ha_url = entry.data[CONF_INTERCOM_KEY], call.data.get("ha_url", "")
+        exec_16 = go2rtc_source(hass, entry.entry_id, key, ha_url)
+        if not may_chu.dang_chay:
+            return {"source": exec_16}
+        host = urlsplit(ha_url).hostname if ha_url else "127.0.0.1"
+        # ``exec_source``: đường 8 kHz cũ, cho go2rtc không với tới cổng 8557 của HA.
+        return {"source": go2rtc_rtsp_source(entry.entry_id, key, host, may_chu.port),
+                "exec_source": exec_16}
+
+    hass.services.async_register(
+        DOMAIN, "get_intercom_source", _nguon_bo_dam,
+        schema=vol.Schema({
+            vol.Required("entity_id"): cv.entity_id,
+            # Địa chỉ HA mà go2rtc gọi tới — bỏ trống khi go2rtc chung mạng với HA.
+            vol.Optional("ha_url"): vol.All(
+                str, vol.Match(r"^https?://[^\s#]+$",
+                               msg="ha_url phải dạng http(s)://địa-chỉ:cổng, không dấu cách hay #")),
+        }),
+        supports_response=SupportsResponse.ONLY)
+    return True
+
+
+def _mo_phien_noi(d, ffmpeg: str = "ffmpeg", sdk_dir: str = "") -> callable:
+    """Hàm mở một phiên nói theo cách camera hỗ trợ (mục cũ không có khoá này là Dahua).
+
+    Imou/Dahua: cổng 8086 (AAC 16 kHz, rõ hơn) trước, 37777 (PCM 8 kHz) dự phòng.
+    EZVIZ / Hikvision không có kênh ngược dùng được: HCNetSDK cổng 8000."""
+    host, user, pw = d[CONF_HOST], d[CONF_USERNAME], d[CONF_PASSWORD]
+    port = int(d.get(CONF_PORT, DEFAULT_PORT))
+    if d.get(CONF_TALK) == TALK_HIK:
+        return MoPhienHik(host, user, pw, sdk_dir=sdk_dir, ffmpeg=ffmpeg)
+    if d.get(CONF_TALK) == TALK_RTSP:
+        path = d.get(CONF_RTSP_PATH) or DEFAULT_RTSP_PATH
+        return lambda: RtspTalkSession(host, user, pw, port=port, path=path)
+    return MoPhienImou(host, user, pw, port=port, ffmpeg=ffmpeg)
+
+
+def che_mic_mac_dinh(d) -> float:
+    """Giây che mic sau khi nói, mặc định theo đường nói. HCNetSDK (EZVIZ): đo 29/09/2026 camera chỉ tắt mic ~2 s cho
+    lượt phát 2,6 s và loa trễ 1,3–1,5 s → 1,8 s. Đường khác: 0,5 s (như tiếng ting)."""
+    return 1.8 if d.get(CONF_TALK) == TALK_HIK else 0.5
+
+
+async def async_setup_entry(hass: HomeAssistant, entry: DahuaTalkConfigEntry) -> bool:
+    if not entry.data.get(CONF_INTERCOM_KEY):
+        # Khoá bộ đàm riêng camera này, sinh một lần rồi giữ: dòng đã dán vào
+        # go2rtc.yaml phải còn đúng sau mỗi lần khởi động lại HA.
+        hass.config_entries.async_update_entry(
+            entry, data={**entry.data, CONF_INTERCOM_KEY: secrets.token_urlsafe(24)})
+    d = entry.data
+    entry.runtime_data = DahuaTalkData(
+        speaker=Speaker(hass, _mo_phien_noi(d, get_ffmpeg_manager(hass).binary,
+                                            hass.config.path(HIK_SDK_DIR))),
+        mic_url=str(d.get(CONF_MIC_URL) or ""),
+        che_mic_giay=che_mic_mac_dinh(d),
+    )
+    await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+    return True
+
+
+async def async_unload_entry(hass: HomeAssistant, entry: DahuaTalkConfigEntry) -> bool:
+    ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
+    if ok:
+        await entry.runtime_data.speaker.async_close()
+    return ok

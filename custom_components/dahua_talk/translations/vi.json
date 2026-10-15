@@ -1,0 +1,129 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Chọn loại camera",
+        "description": "Mỗi loại chỉ hỏi đúng những thông số nó cần.",
+        "menu_options": {
+          "imou": "Imou / Dahua",
+          "ezviz": "EZVIZ",
+          "onvif": "Hikvision / camera ONVIF khác"
+        }
+      },
+      "imou": {
+        "title": "Camera Imou / Dahua",
+        "description": "Loa nói qua cổng 37777 của camera. Mật khẩu: mật khẩu thiết bị hoặc mã an toàn in trên tem. URL mic chỉ điền khi dùng vệ tinh Assist, ví dụ http://MÁY:1984/api/stream.mp4?src=cam-sub&video=none&audio=all",
+        "data": {
+          "name": "Tên",
+          "host": "IP camera",
+          "port": "Cổng nói",
+          "username": "Tài khoản",
+          "password": "Mật khẩu",
+          "mic_url": "URL tiếng mic (không bắt buộc)"
+        }
+      },
+      "ezviz": {
+        "title": "Camera EZVIZ",
+        "description": "Loa nói qua kênh tiếng ngược RTSP (cổng 554, tài khoản admin — tự điền). Mật khẩu là MÃ XÁC MINH 6 chữ IN HOA trên tem dưới đáy camera (hoặc mật khẩu bạn đã đổi). Muốn camera làm vệ tinh Assist / nghe từ gọi thì tick \"Nghe mic camera\" — URL mic tự dựng, không phải gõ mật khẩu vào URL. Chỉ tick khi HA đã có pipeline đủ từ gọi + STT + TTS.",
+        "data": {
+          "name": "Tên",
+          "host": "IP camera",
+          "password": "Mật khẩu (mã xác minh 6 chữ IN HOA trên tem, hoặc mật khẩu đã đổi)",
+          "mic_url": "URL mic khác (để trống = đọc thẳng luồng phụ camera)",
+          "nghe_mic": "Nghe mic camera (vệ tinh Assist, từ gọi)"
+        }
+      },
+      "onvif": {
+        "title": "Camera Hikvision / ONVIF",
+        "description": "Loa nói qua kênh tiếng ngược RTSP/ONVIF. Hikvision: luồng chính /Streaming/Channels/101. URL mic chỉ điền khi dùng vệ tinh Assist.",
+        "data": {
+          "name": "Tên",
+          "host": "IP camera",
+          "port": "Cổng nói",
+          "rtsp_path": "Đường dẫn luồng RTSP",
+          "username": "Tài khoản",
+          "password": "Mật khẩu",
+          "mic_url": "URL tiếng mic (không bắt buộc)"
+        }
+      },
+      "reconfigure": {
+        "title": "Cấu hình lại camera",
+        "description": "Khoá bộ đàm được GIỮ — dòng đã dán trong go2rtc.yaml (rtsp:// hay exec:) vẫn dùng được. Để trống mật khẩu là giữ mật khẩu cũ.",
+        "data": {
+          "host": "IP camera",
+          "port": "Cổng nói",
+          "rtsp_path": "Đường dẫn luồng RTSP",
+          "username": "Tài khoản",
+          "mic_url": "URL tiếng mic (không bắt buộc)",
+          "password": "Mật khẩu / mã xác minh (trống = giữ cũ)",
+          "nghe_mic": "Nghe mic camera (vệ tinh Assist, từ gọi)"
+        }
+      }
+    },
+    "error": {
+      "invalid_auth": "Camera từ chối đăng nhập (sai vài lần là camera khoá phiên — kiểm kỹ trước khi thử lại).",
+      "cannot_connect": "Không nối được cổng nói của camera.",
+      "invalid_mic_url": "URL mic phải bắt đầu bằng rtsp://, http:// hoặc https://",
+      "no_backchannel": "Luồng RTSP không có kênh tiếng ngược. EZVIZ / Hikvision: chép thư mục lib của \"Device Network SDK (Linux 64-bit)\" (tải ở trang Hikvision) vào /config/hcnetsdk/lib — loa sẽ nói qua SDK cổng 8000."
+    },
+    "abort": {
+      "already_configured": "Camera này đã được thêm.",
+      "reconfigure_successful": "Đã cập nhật camera."
+    }
+  },
+  "entity": {
+    "select": {
+      "pipeline": {
+        "name": "Trợ lý",
+        "state": {
+          "preferred": "Ưu tiên"
+        }
+      },
+      "vad_sensitivity": {
+        "name": "Phát hiện nói xong",
+        "state": {
+          "default": "Mặc định",
+          "aggressive": "Nhanh",
+          "relaxed": "Thong thả"
+        }
+      }
+    },
+    "switch": {
+      "mute": {
+        "name": "Tắt mic"
+      },
+      "wake_sound": {
+        "name": "Tiếng ting khi gọi"
+      }
+    },
+    "media_player": {
+      "speaker": {
+        "name": "Loa"
+      }
+    },
+    "number": {
+      "mic_gain": {
+        "name": "Tăng mic"
+      },
+      "mute_after_speaking": {
+        "name": "Che mic sau khi nói"
+      }
+    }
+  },
+  "services": {
+    "get_intercom_source": {
+      "name": "Dòng go2rtc cho bộ đàm",
+      "description": "Trả dòng dán vào go2rtc.yaml (cuối danh sách nguồn của luồng camera) để thẻ WebRTC Camera nói ra loa camera: nguồn rtsp:// cổng 8557 (tiếng điện thoại Opus, phát 16 kHz), hoặc dòng exec: (8 kHz) khi HA không giải mã được Opus. exec_source là dòng 8 kHz, cho go2rtc không với tới cổng 8557.",
+      "fields": {
+        "entity_id": {
+          "name": "Loa camera",
+          "description": "media_player của camera"
+        },
+        "ha_url": {
+          "name": "Địa chỉ HA cho go2rtc",
+          "description": "Bỏ trống nếu go2rtc chạy chung mạng với HA (add-on go2rtc). go2rtc ở máy/VM khác hoặc trong Frigate: điền địa chỉ LAN của HA, vd http://192.168.1.10:8123."
+        }
+      }
+    }
+  }
+}

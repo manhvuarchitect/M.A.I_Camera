@@ -30,12 +30,12 @@ Trong Home Assistant:
 
 Thêm URL:
 ```
-https://github.com/manhvuarchitect/M.A.I-addons
+https://github.com/manhvuarchitect/M.A.I_Camera
 ```
 
 ### Bước 2: Cài addon
 
-Tìm **"M.A.I Tuya Camera Stream"** → Install.
+Tìm **"M.A.I Camera"** → Install.
 
 ### Bước 3: Cấu hình
 
