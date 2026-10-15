@@ -95,6 +95,12 @@ def _day_du(loai: str, v: dict[str, Any], hik: bool = False) -> dict[str, Any]:
         v[CONF_MIC_URL] = rieng or (url_mic_ezviz(v[CONF_HOST], v.get(CONF_PASSWORD, ""))
                                     if v.get(CONF_NGHE_MIC) else "")
     duong = str(v.get(CONF_RTSP_PATH) or DEFAULT_RTSP_PATH).strip()
+    if duong.lower().startswith("rtsp://"):
+        from urllib.parse import urlsplit
+        parsed = urlsplit(duong)
+        duong = parsed.path or DEFAULT_RTSP_PATH
+        if parsed.query:
+            duong += f"?{parsed.query}"
     v[CONF_RTSP_PATH] = duong if duong.startswith("/") else "/" + duong
     return v
 
